@@ -4,13 +4,49 @@
 
 ---
 
+## Results
+
+Only **11.5% of claims are fraud**, so a model that always answers "not fraud" already gets ~88.5% accuracy.
+Accuracy is therefore the wrong yardstick here. The pipeline is evaluated on the **fraud class** instead:
+how many fraud cases it catches (recall), how precise its flags are, and PR-AUC.
+
+Held-out test set: 6,000 claims never used for training, model selection or threshold tuning.
+
+| Model | Accuracy | Fraud recall | Fraud precision | Fraud F1 | PR-AUC |
+|---|---|---|---|---|---|
+| Always predict "not fraud" | 0.885 | 0.000 | – | 0.000 | 0.115 (chance) |
+| Previous approach (selected by accuracy, threshold 0.5) | 0.883 | 0.028 | 0.365 | 0.051 | 0.279 |
+| **Current: Hist Gradient Boosting, class-weighted, tuned threshold** | 0.765 | **0.645** | 0.276 | **0.386** | **0.282** |
+
+**What changed and why**
+
+1. **Model selection by validation PR-AUC on the fraud class**, not by accuracy. Accuracy rewarded models that ignore fraud.
+2. **Class weighting** (`class_weight="balanced"`) so the minority class counts during training.
+3. **Decision threshold tuned on a validation split** (0.57, maximising fraud F1) instead of the default 0.5. The API uses this threshold.
+4. **Train / validation / test split (60 / 20 / 20)** with the preprocessor fit on the training split only. The test split is used once, for the table above.
+5. **Removed full-dataset "accuracy"** reporting, which scored the model on its own training rows and overstated performance.
+
+Result: the model now catches **444 of 688 fraud cases (64.5%)** in the test set, up from **2.8%**.
+The trade-off is more false alarms (1,167 legitimate claims flagged), which is the usual cost of
+catching fraud and can be moved along the precision/recall curve by changing the threshold.
+
+Note that PR-AUC barely moved (0.279 → 0.282): the old model could already rank claims by risk about as well.
+The big gain comes from **evaluating and deciding correctly** (the right metric and the right threshold), not from a stronger model.
+
+**Honest limits:** PR-AUC of 0.28 is about 2.5× chance, so the features carry real but limited signal.
+Better fraud detection would need richer data (claim history, repairer and network features) rather than more model tuning.
+
+Full metrics for every candidate model are in `reports/metrics.json`.
+
+---
+
 ## Features
 
 - **Notebook (Colab):** EDA, preprocessing, feature engineering, multiple classifiers (LR, NB, KNN, SVM, DT, RF, GB, optional XGBoost), evaluation, save best model by accuracy.
-- **Local training:** `src/train_local.py` — same pipeline, extra features, optional SMOTE, RF/GB/XGBoost with tuning, optional ensemble; refit on full data for high accuracy.
+- **Local training:** `src/train_local.py` — train/validation/test split, class-weighted LR, RF, GB and HistGradientBoosting, model selection by fraud-class PR-AUC, threshold tuning, and a final one-time test evaluation against baselines. Writes `reports/metrics.json`.
 - **API:** FastAPI with `/predict` — load preprocessor + model from `saved_models/`, return prediction and fraud probability.
 - **Web app:** Streamlit form (Policy & Insured, Incident & Claim), calls API, shows Fraud/Legitimate and probability.
-- **Accuracy script:** `src/show_accuracy.py` — evaluate saved model on the dataset (accuracy, classification report, confusion matrix).
+- **Evaluation script:** `src/show_accuracy.py` — prints the held-out test results (fraud recall, precision, F1, PR-AUC, confusion matrix) next to the baselines.
 
 ---
 
@@ -37,13 +73,16 @@ vehicle_insurance_fraud/
 │   ├── preprocessor.pkl
 │   ├── best_model.pkl
 │   ├── feature_names.pkl
-│   └── input_columns.pkl
+│   ├── input_columns.pkl
+│   └── threshold.json                        # Decision threshold tuned on validation data
+├── reports/
+│   └── metrics.json                          # Validation + test metrics written by src/train_local.py
 ├── scripts/
 │   ├── run_api.sh                            # Start FastAPI (from project root)
 │   └── run_streamlit.sh                     # Start Streamlit (from project root)
 ├── src/
-│   ├── train_local.py                        # Local training (same pipeline + extras, RF/GB/XGB)
-│   └── show_accuracy.py                      # Evaluate saved model on dataset
+│   ├── train_local.py                        # Training, model selection, threshold tuning, test evaluation
+│   └── show_accuracy.py                      # Print held-out test metrics
 ├── notebooks/
 │   └── Vehicle_Insurance_Fraud_Detection.ipynb   # Colab: EDA, preprocessing, FE, training, save model
 ├── api/
@@ -151,7 +190,9 @@ From project root with venv activated:
 python src/train_local.py
 ```
 
-This writes `saved_models/preprocessor.pkl` and `saved_models/best_model.pkl`. The script uses the same feature pipeline as the API (with extra engineered features). Optional: set env vars for data path, SMOTE, full-data refit, etc. (see script).
+This writes the preprocessor, model and `threshold.json` to `saved_models/`, and all metrics to `reports/metrics.json`. The script uses the same feature pipeline as the API. Set `DATA_PATH` to use a different CSV. Training takes under a minute on a laptop CPU.
+
+> The Colab notebook is kept as the original exploration (EDA and first model comparison). Its model selection by accuracy is superseded by `src/train_local.py`, which produces the model the API serves.
 
 **Important:** The API expects **scikit-learn 1.4.0** to load the pickles. If you retrain with a different sklearn version, either keep that version when running the API or retrain after upgrading.
 
@@ -161,7 +202,7 @@ This writes `saved_models/preprocessor.pkl` and `saved_models/best_model.pkl`. T
 |--------|------------|-------------|
 | GET    | `/`        | Welcome + link to docs |
 | GET    | `/health`  | Status + whether model is loaded |
-| POST   | `/predict` | JSON body with claim fields → `prediction`, `label`, `probability_fraud` |
+| POST   | `/predict` | JSON body with claim fields → `prediction`, `label`, `probability_fraud`, `threshold` (fraud if probability ≥ threshold) |
 
 Request body (all fields have defaults): `policy_state`, `policy_deductible`, `policy_annual_premium`, `insured_age`, `insured_sex`, `insured_education_level`, `insured_occupation`, `insured_hobbies`, `incident_type`, `collision_type`, `incident_severity`, `authorities_contacted`, `incident_state`, `incident_date` (YYYY-MM-DD), `incident_hour_of_the_day`, `number_of_vehicles_involved`, `bodily_injuries`, `witnesses`, `police_report_available`, `claim_amount`, `total_claim_amount`.  
 See **http://localhost:8000/docs** for the full schema.
@@ -176,9 +217,9 @@ See **http://localhost:8000/docs** for the full schema.
   STREAMLIT_API_URL=http://your-host:8000 streamlit run streamlit_app/app.py
   ```
 
-### Check model accuracy
+### Check model performance
 
-From project root (with venv activated and dataset in `dataset/`):
+From project root (after running `src/train_local.py`):
 
 ```bash
 python src/show_accuracy.py
@@ -190,14 +231,14 @@ Or from `api/` (wrapper runs `src/show_accuracy.py` with correct cwd):
 cd api && python show_accuracy.py
 ```
 
-Prints accuracy, classification report, and confusion matrix for the saved model on the full dataset.
+Prints the held-out test metrics for the saved model next to the two baselines.
 
 ---
 
 ## Models and pipeline
 
-- **Notebook:** Best model selected by **accuracy** among LR, NB, KNN, SVM, DT, RF, GB (optional XGBoost).  
-- **src/train_local.py:** RandomizedSearchCV on RF, GB, XGBoost (optional LightGBM), optional ensemble; same preprocessing and feature engineering as the notebook plus extra features (e.g. age_group, incident_weekend, log claim amounts, high_claim_ratio).  
+- **Notebook:** Original exploration; compares LR, NB, KNN, SVM, DT, RF, GB by accuracy (kept for reference, see Results for why accuracy misleads here).  
+- **src/train_local.py:** Class-weighted Logistic Regression, Random Forest, Gradient Boosting and HistGradientBoosting; selection by validation PR-AUC; threshold tuned for fraud F1; extra features (age_group, incident_weekend, log claim amounts, claim_ratio, high_claim_ratio).  
 - **Preprocessing:** ColumnTransformer (OneHotEncoder for categoricals, StandardScaler for numerics); same pipeline in notebook, `src/train_local.py`, and `api/preprocess.py` so the API input matches training.
 
 ---
@@ -207,7 +248,7 @@ Prints accuracy, classification report, and confusion matrix for the saved model
 | Component   | Stack |
 |------------|--------|
 | Notebook   | pandas, numpy, matplotlib, seaborn, scikit-learn |
-| Training   | scikit-learn, optional: xgboost, lightgbm, imbalanced-learn (SMOTE) |
+| Training   | scikit-learn |
 | API        | FastAPI, Pydantic, uvicorn |
 | Frontend   | Streamlit, requests |
 

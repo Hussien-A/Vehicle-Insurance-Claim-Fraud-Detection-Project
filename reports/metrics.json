@@ -1,0 +1,138 @@
+{
+  "data": {
+    "rows": 30000,
+    "fraud_rate": 0.1147,
+    "split": {
+      "train": 18000,
+      "val": 6000,
+      "test": 6000
+    }
+  },
+  "selection": {
+    "metric": "validation PR-AUC (fraud class)",
+    "selected": "Hist Gradient Boosting"
+  },
+  "validation": {
+    "Logistic Regression": {
+      "threshold": 0.5628,
+      "accuracy": 0.7253,
+      "fraud_precision": 0.2112,
+      "fraud_recall": 0.5102,
+      "fraud_f1": 0.2987,
+      "pr_auc": 0.2111,
+      "roc_auc": 0.6808,
+      "confusion_matrix": [
+        [
+          4001,
+          1311
+        ],
+        [
+          337,
+          351
+        ]
+      ]
+    },
+    "Random Forest": {
+      "threshold": 0.3907,
+      "accuracy": 0.7677,
+      "fraud_precision": 0.284,
+      "fraud_recall": 0.6744,
+      "fraud_f1": 0.3997,
+      "pr_auc": 0.2747,
+      "roc_auc": 0.7442,
+      "confusion_matrix": [
+        [
+          4142,
+          1170
+        ],
+        [
+          224,
+          464
+        ]
+      ]
+    },
+    "Hist Gradient Boosting": {
+      "threshold": 0.5704,
+      "accuracy": 0.7687,
+      "fraud_precision": 0.2874,
+      "fraud_recall": 0.6875,
+      "fraud_f1": 0.4053,
+      "pr_auc": 0.2785,
+      "roc_auc": 0.7423,
+      "confusion_matrix": [
+        [
+          4139,
+          1173
+        ],
+        [
+          215,
+          473
+        ]
+      ]
+    },
+    "Gradient Boosting": {
+      "threshold": 0.5493,
+      "accuracy": 0.7725,
+      "fraud_precision": 0.2883,
+      "fraud_recall": 0.6701,
+      "fraud_f1": 0.4031,
+      "pr_auc": 0.2751,
+      "roc_auc": 0.7418,
+      "confusion_matrix": [
+        [
+          4174,
+          1138
+        ],
+        [
+          227,
+          461
+        ]
+      ]
+    }
+  },
+  "test": {
+    "selected_model": {
+      "threshold": 0.5704,
+      "accuracy": 0.7648,
+      "fraud_precision": 0.2756,
+      "fraud_recall": 0.6453,
+      "fraud_f1": 0.3863,
+      "pr_auc": 0.2822,
+      "roc_auc": 0.7347,
+      "confusion_matrix": [
+        [
+          4145,
+          1167
+        ],
+        [
+          244,
+          444
+        ]
+      ]
+    },
+    "baseline_always_not_fraud": {
+      "accuracy": 0.8853,
+      "fraud_recall": 0.0,
+      "fraud_f1": 0.0
+    },
+    "baseline_previous_approach": {
+      "threshold": 0.5,
+      "accuracy": 0.883,
+      "fraud_precision": 0.3654,
+      "fraud_recall": 0.0276,
+      "fraud_f1": 0.0514,
+      "pr_auc": 0.2785,
+      "roc_auc": 0.7265,
+      "confusion_matrix": [
+        [
+          5279,
+          33
+        ],
+        [
+          669,
+          19
+        ]
+      ]
+    }
+  }
+}
