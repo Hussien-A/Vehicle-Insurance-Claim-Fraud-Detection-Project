@@ -1,3 +1,4 @@
+import json
 import os
 import pickle
 from pathlib import Path
@@ -19,10 +20,11 @@ app = FastAPI(
 
 preprocessor = None
 model = None
+threshold = 0.5  # overwritten by saved_models/threshold.json (tuned on validation data)
 
 
 def load_artifacts():
-    global preprocessor, model
+    global preprocessor, model, threshold
     preprocessor_path = MODELS_DIR / "preprocessor.pkl"
     model_path = MODELS_DIR / "best_model.pkl"
     if not preprocessor_path.exists() or not model_path.exists():
@@ -33,6 +35,10 @@ def load_artifacts():
         preprocessor = pickle.load(f)
     with open(model_path, "rb") as f:
         model = pickle.load(f)
+    threshold_path = MODELS_DIR / "threshold.json"
+    if threshold_path.exists():
+        with open(threshold_path) as f:
+            threshold = float(json.load(f)["threshold"])
 
 
 @app.on_event("startup")
@@ -73,6 +79,7 @@ class PredictionResponse(BaseModel):
     prediction: int
     label: str
     probability_fraud: Optional[float] = None
+    threshold: Optional[float] = None
 
 
 @app.get("/")
@@ -94,14 +101,15 @@ def predict(req: PredictionRequest):
         data = req.model_dump()
         df = build_features_from_request(data)
         X = preprocessor.transform(df)
-        pred = int(model.predict(X)[0])
-        proba = None
-        if hasattr(model, "predict_proba"):
-            proba = float(model.predict_proba(X)[0, 1])
+        # Use the decision threshold tuned on validation data instead of the default 0.5:
+        # with ~11.5% fraud, 0.5 makes the model almost never flag fraud.
+        proba = float(model.predict_proba(X)[0, 1])
+        pred = int(proba >= threshold)
         return PredictionResponse(
             prediction=pred,
             label="Fraud" if pred == 1 else "Legitimate",
             probability_fraud=proba,
+            threshold=threshold,
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
